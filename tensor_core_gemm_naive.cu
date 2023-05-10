@@ -44,6 +44,8 @@ wmmaNaiveKernel(
     size_t N, 
     size_t K) 
 {
+    // A row major
+    // B column major
     extern __shared__ half shm[];
     half * a_blk_shm_ptr = shm;
     half * b_blk_shm_ptr = shm + BMMA_M * BMMA_K;
