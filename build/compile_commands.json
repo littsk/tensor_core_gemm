@@ -1,7 +1,0 @@
-[
-{
-  "directory": "/home/data/test/tensor_core_gemm/build",
-  "command": "/usr/local/cuda/bin/nvcc   -I/home/data/cutlass/cutlass/build/install/include  -g   -arch=sm_70 -std=c++17 -x cu -c /home/data/test/tensor_core_gemm/tensor_core_gemm_naive.cu -o CMakeFiles/tensor_core_gemm_naive.dir/tensor_core_gemm_naive.cu.o && /usr/local/cuda/bin/nvcc   -I/home/data/cutlass/cutlass/build/install/include  -g   -arch=sm_70 -std=c++17 -x cu -M /home/data/test/tensor_core_gemm/tensor_core_gemm_naive.cu -MT CMakeFiles/tensor_core_gemm_naive.dir/tensor_core_gemm_naive.cu.o -o $DEP_FILE",
-  "file": "/home/data/test/tensor_core_gemm/tensor_core_gemm_naive.cu"
-}
-]
