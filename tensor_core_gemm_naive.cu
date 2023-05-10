@@ -23,7 +23,7 @@
 
 #define WARP_SIZE 32
 
-#define SCALE 2048.f
+#define SCALE 1.f
 
 #define CUDACHECK(cmd) do {                         \
   cudaError_t e = cmd;                              \
@@ -52,9 +52,9 @@ wmmaNaiveKernel(
     float * c_blk_shm_ptr = (float *)(shm + BMMA_M * BMMA_K + BMMA_K * BMMA_N);
 
     // 全局的 warp idx
-    // 一个warp负责一个C中的block，一个C中的block的大小是（WMMA_M，WMMA_N）
-    size_t warpM = (blockIdx.x * blockDim.x + threadIdx.x) / WARP_SIZE; //C中 row_tile_idx
-    size_t warpN = (blockIdx.y * blockDim.y + threadIdx.y);             //C中 col_tile_idx
+    // 一个warp负责一个C中的tile，一个C中的tile的大小是（WMMA_M，WMMA_N）
+    size_t warp_tile_col_idx = (blockIdx.x * blockDim.x + threadIdx.x) / WARP_SIZE; 
+    size_t warp_tile_row_idx = (blockIdx.y * blockDim.y + threadIdx.y);             //C中 col_tile_idx
     
     // block 中的 warp idx
     size_t warp_col_idx = threadIdx.x / WARP_SIZE;
@@ -69,15 +69,15 @@ wmmaNaiveKernel(
     
     nvcuda::wmma::fill_fragment(c_frag, 0.0f);
 
-    for(size_t i = 0; i < K; i += WMMA_K){
-        size_t aCol = i;
-        size_t aRow = warpM * WMMA_M; 
-        size_t bCol = warpN * WMMA_N;
-        size_t bRow = i;
+    for(size_t i = 0; i < K; i += BMMA_K){
+        size_t aCol = i + warp_col_idx * WMMA_K;
+        size_t aRow = warp_tile_row_idx * WMMA_M; 
+        size_t bCol = i + warp_col_idx * WMMA_K;
+        size_t bRow = warp_tile_row_idx * WMMA_N;
         size_t a_frag_shm_start_idx = (warp_row_idx * WMMA_M) * BMMA_K + (warp_col_idx * WMMA_K);
         size_t a_frag_global_start_idx = aRow * K + aCol;
         size_t b_frag_shm_start_idx = (warp_row_idx * WMMA_N) * BMMA_K + (warp_col_idx * WMMA_K); // 因为B是列主序的
-        size_t b_frag_global_start_idx = bCol * K + bRow;
+        size_t b_frag_global_start_idx = bRow * K + bCol;
         if(threadID < WMMA_K){ //threadID 应该严格小于WMMA_K
             for(int i = 0; i < WMMA_M; ++i){
                 if((aRow + i) < M && (aCol + threadID) < K){
@@ -93,9 +93,9 @@ wmmaNaiveKernel(
         }
         if(threadID < WMMA_K){ // 因为B是列主序的
             for(int i = 0; i < WMMA_N; ++i){
-                if((bRow + threadID) < K && (bCol + i) < N){
-                        *(b_blk_shm_ptr + b_frag_shm_start_idx + (i * BMMA_K) + threadID) =
-                            *(B + b_frag_global_start_idx + (i * K) + threadID);
+                if((bRow + i) < N && (bCol + threadID) < K){
+                    *(b_blk_shm_ptr + b_frag_shm_start_idx + (i * BMMA_K) + threadID) =
+                        *(B + b_frag_global_start_idx + (i * K) + threadID);
                 }
                 else{
                     // printf("dive into bound b col : %lld, row : %lld\n", bCol + i, bRow + threadID);
@@ -105,16 +105,22 @@ wmmaNaiveKernel(
         }
         __syncthreads();
 
-        if (aRow < M && aCol < K && bRow < K && bCol < N) { // 这个判断是有必要的吗
-            nvcuda::wmma::load_matrix_sync(a_frag, a_blk_shm_ptr + (warp_row_idx * WMMA_M) * BMMA_K + warp_col_idx * WMMA_K, BMMA_K);
-            nvcuda::wmma::load_matrix_sync(b_frag, b_blk_shm_ptr + (warp_row_idx * WMMA_N) * BMMA_K + warp_col_idx * WMMA_K, BMMA_K);
-            nvcuda::wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+        for(int k = 0; k < BMMA_K; k += WMMA_K){
+            if(warp_tile_row_idx == 0 && warp_tile_col_idx == 0 && threadID == 0){
+                printf("yes\n");
+            }
+            if (aRow < M && aCol < K && bRow < K && bCol < N) { // 这个判断是有必要的吗
+                nvcuda::wmma::load_matrix_sync(a_frag, a_blk_shm_ptr + (warp_row_idx * WMMA_M) * BMMA_K + k, BMMA_K);
+                nvcuda::wmma::load_matrix_sync(b_frag, b_blk_shm_ptr + (warp_col_idx * WMMA_N) * BMMA_K + k, BMMA_K);
+                nvcuda::wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+            }
         }
+        
 
     }
 
-    size_t cCol = warpN * WMMA_N;
-    size_t cRow = warpM * WMMA_M;
+    size_t cCol = warp_tile_col_idx * WMMA_N;
+    size_t cRow = warp_tile_row_idx * WMMA_M;
     if (cRow < M && cCol < N) { // 这个判断是有必要的嘛
         size_t c_frag_shm_start_idx = (warp_row_idx * WMMA_M) * BMMA_N + (warp_col_idx * WMMA_N);
         size_t c_frag_global_start_idx = cRow * N + cCol;
@@ -233,7 +239,7 @@ cutlass_gemm(
 int main(int agrc, char * argv[])
 {  
     std::srand(320);
-    int m = 512, n = 512, k = 512;
+    int m = 19, n = 19, k = 19;
 
     float * ha, * hb, * hc;
     ha = (float *)malloc(m * k * sizeof(float));
@@ -270,7 +276,7 @@ int main(int agrc, char * argv[])
     
     gemm_cpu(ha, hb, hc, m, n, k);
     gemm_gpu(da, db, dc, m, n, k);
-    cutlass_gemm(cut_da, cut_db, cut_dc, m, n, k);
+    // cutlass_gemm(cut_da, cut_db, cut_dc, m, n, k);
 
     CUDACHECK(cudaDeviceSynchronize());
 
