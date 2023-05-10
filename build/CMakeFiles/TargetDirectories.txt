@@ -1,0 +1,3 @@
+/home/data/test/tensor_core_gemm/build/CMakeFiles/rebuild_cache.dir
+/home/data/test/tensor_core_gemm/build/CMakeFiles/edit_cache.dir
+/home/data/test/tensor_core_gemm/build/CMakeFiles/tensor_core_gemm_naive.dir

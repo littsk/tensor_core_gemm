@@ -1,0 +1,16 @@
+# ninja log v5
+2	8657	1683710309	CMakeFiles/tensor_core_gemm_naive.dir/tensor_core_gemm_naive.cu.o	c16c8002351c70f1
+1	2289	1683598525	CMakeFiles/tensor_core_gemm.dir/main.cu.o	2b311cbf39146132
+8658	8736	1683710310	tensor_core_gemm_naive	1ec94cc44a68cc02
+2289	2353	1683598525	tensor_core_gemm	49248bd8a48ca7d1
+2	8403	1683709413	CMakeFiles/tensor_core_gemm_naive.dir/main.cu.o	66baf7b22609e285
+3	8428	1683709413	CMakeFiles/tensor_core_gemm_advanced.dir/main.cu.o	f6e5614f37009861
+3	77	1683709421	tensor_core_gemm_advanced	50b04f28187de219
+3	8501	1683710355	CMakeFiles/tensor_core_gemm_naive.dir/tensor_core_gemm_naive.cu.o	22e7e751f6409047
+8501	8574	1683710356	libtensor_core_gemm_naive.so	8c21936b7ffcdf78
+2	8752	1683711042	CMakeFiles/tensor_core_gemm_naive.dir/tensor_core_gemm_naive.cu.o	c16c8002351c70f1
+8752	8830	1683711043	tensor_core_gemm_naive	1ec94cc44a68cc02
+2	8985	1683711173	CMakeFiles/tensor_core_gemm_naive.dir/tensor_core_gemm_naive.cu.o	c16c8002351c70f1
+8985	9060	1683711174	tensor_core_gemm_naive	1ec94cc44a68cc02
+2	8960	1683711211	CMakeFiles/tensor_core_gemm_naive.dir/tensor_core_gemm_naive.cu.o	c16c8002351c70f1
+8960	9043	1683711212	tensor_core_gemm_naive	1ec94cc44a68cc02
