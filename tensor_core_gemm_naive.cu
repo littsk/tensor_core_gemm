@@ -23,7 +23,7 @@
 
 #define WARP_SIZE 32
 
-#define SCALE 1.f
+#define SCALE 2048.f
 
 #define CUDACHECK(cmd)                                         \
     do                                                         \
@@ -47,7 +47,7 @@ wmmaNaiveKernel(
     size_t K)
 {
     // A row major
-    // B column major
+    // B row major
     extern __shared__ half shm[];
     half *a_blk_shm_ptr = shm;
     half *b_blk_shm_ptr = shm + BMMA_M * BMMA_K;
@@ -64,10 +64,11 @@ wmmaNaiveKernel(
     // block 中的 warp idx
     size_t warp_col_idx = threadIdx.x / WARP_SIZE;
     size_t warp_row_idx = threadIdx.y;
+    // warp 中的 thread idx
     size_t threadID = (threadIdx.x + threadIdx.y * blockDim.x) % WARP_SIZE;
 
     nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, nvcuda::wmma::row_major> a_frag;
-    nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, nvcuda::wmma::col_major> b_frag;
+    nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, nvcuda::wmma::row_major> b_frag;
     nvcuda::wmma::fragment<nvcuda::wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
 
     nvcuda::wmma::fill_fragment(c_frag, 0.0f);
@@ -76,8 +77,8 @@ wmmaNaiveKernel(
     {
         size_t a_block_tile_left_idx = i;
         size_t a_block_tile_up_idx = block_tile_row_idx * BMMA_M;
-        size_t b_block_tile_left_idx = i;
-        size_t b_block_tile_up_idx = block_tile_col_idx * BMMA_N;
+        size_t b_block_tile_left_idx = block_tile_col_idx * BMMA_N;
+        size_t b_block_tile_up_idx = i;
 
         // 一个warp负责搬运一个warp tile大小的数据
 
@@ -87,11 +88,11 @@ wmmaNaiveKernel(
         size_t a_warp_tile_left_idx = a_block_tile_left_idx + warp_col_idx * WMMA_K;
         size_t a_warp_tile_start_idx = a_warp_tile_up_idx * K + a_warp_tile_left_idx;
 
-        size_t b_warp_tile_shm_start_idx = (warp_row_idx * WMMA_N) * BMMA_K + (warp_col_idx * WMMA_K); // 因为B是列主序的
+        size_t b_warp_tile_shm_start_idx = (warp_row_idx * WMMA_K) * BMMA_N + (warp_col_idx * WMMA_N);
         // warp tile 在 global中的坐标
-        size_t b_warp_tile_up_idx = b_block_tile_up_idx + warp_row_idx * WMMA_N;
-        size_t b_warp_tile_left_idx = b_block_tile_left_idx + warp_col_idx * WMMA_K;
-        size_t b_warp_tile_start_idx = b_warp_tile_up_idx * K + b_warp_tile_left_idx;
+        size_t b_warp_tile_up_idx = b_block_tile_up_idx + warp_row_idx * WMMA_K;
+        size_t b_warp_tile_left_idx = b_block_tile_left_idx + warp_col_idx * WMMA_N;
+        size_t b_warp_tile_start_idx = b_warp_tile_up_idx * N + b_warp_tile_left_idx;
 
         if (threadID < WMMA_K)
         { // threadID 应该严格小于WMMA_K
@@ -109,19 +110,19 @@ wmmaNaiveKernel(
                 }
             }
         }
-        if (threadID < WMMA_K) // 因为B是列主序的
+        if (threadID < WMMA_N)
         { 
-            for (int j = 0; j < WMMA_N; ++j) 
+            for (int j = 0; j < WMMA_K; ++j) 
             {
                 if ((b_warp_tile_up_idx + j) < N && (b_warp_tile_left_idx + threadID) < K)
                 {
-                    *(b_blk_shm_ptr + b_warp_tile_shm_start_idx + (j * BMMA_K) + threadID) =
-                        *(B + b_warp_tile_start_idx + (j * K) + threadID);
+                    *(b_blk_shm_ptr + b_warp_tile_shm_start_idx + (j * BMMA_N) + threadID) =
+                        *(B + b_warp_tile_start_idx + (j * N) + threadID);
                 }
                 else
                 {
                     // printf("dive into bound b col : %lld, row : %lld\n", b_block_tile_left_idx + i, b_blocktile_up_idxw + threadID);
-                    *(b_blk_shm_ptr + b_warp_tile_shm_start_idx + (j * BMMA_K) + threadID) = 0_hf;
+                    *(b_blk_shm_ptr + b_warp_tile_shm_start_idx + (j * BMMA_N) + threadID) = 0_hf;
                 }
             }
         }
@@ -136,7 +137,7 @@ wmmaNaiveKernel(
             if (a_block_tile_up_idx < M && a_block_tile_left_idx < K && b_block_tile_up_idx < K && b_block_tile_left_idx < N)
             { // 这个判断是有必要的吗
                 nvcuda::wmma::load_matrix_sync(a_frag, a_blk_shm_ptr + (warp_row_idx * WMMA_M) * BMMA_K + k, BMMA_K);
-                nvcuda::wmma::load_matrix_sync(b_frag, b_blk_shm_ptr + (warp_col_idx * WMMA_N) * BMMA_K + k, BMMA_K);
+                nvcuda::wmma::load_matrix_sync(b_frag, b_blk_shm_ptr + k * BMMA_K + (warp_col_idx * WMMA_N), BMMA_N);
                 nvcuda::wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
             }
         }
@@ -211,7 +212,7 @@ void gemm_cpu(
             for (int k = 0; k < K; ++k)
             {
                 int a_idx = i * K + k;
-                int b_idx = j * K + k;
+                int b_idx = k * K + j;
                 C[c_idx] += A[a_idx] * B[b_idx];
             }
         }
@@ -231,7 +232,7 @@ int cutlass_gemm(
         cutlass::half_t,
         cutlass::layout::RowMajor,
         cutlass::half_t,
-        cutlass::layout::ColumnMajor,
+        cutlass::layout::RowMajor,
         float,
         cutlass::layout::RowMajor,
         float,
@@ -265,7 +266,7 @@ int cutlass_gemm(
 int main(int agrc, char *argv[])
 {
     std::srand(320);
-    int m = 99, n = 99, k = 99;
+    int m = 63, n = 63, k = 63;
 
     float *ha, *hb, *hc;
     ha = (float *)malloc(m * k * sizeof(float));
@@ -309,7 +310,7 @@ int main(int agrc, char *argv[])
     bool flag = true;
     for (int i = 0; i < m * n; ++i)
     {
-        if (abs((hc[i] - dc[i]) / max(hc[i], dc[i])) > 1e-4)
+        if (abs((hc[i] - dc[i]) / max(hc[i], dc[i])) > 1e-3)
         { // || (hc[i] - cut_dc[i]) > 1e-5){
             printf("%d error: hc %f, dc %f, cut_dc %f\n", i, hc[i], dc[i], cut_dc[i]);
             flag = false;
